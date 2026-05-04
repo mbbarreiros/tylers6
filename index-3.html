@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TYLERS 6.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, set, get, push, update, onValue, child }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  // ╔══════════════════════════════════════════════════════════╗
+  // ║  CONFIGURE AQUI O SEU FIREBASE                          ║
+  // ║  1. Acesse https://console.firebase.google.com          ║
+  // ║  2. Crie um projeto                                     ║
+  // ║  3. Vá em "Realtime Database" → Criar banco de dados   ║
+  // ║  4. Copie as configurações e cole abaixo               ║
+  // ╚══════════════════════════════════════════════════════════╝
+  const firebaseConfig = {
+    apiKey:            "AIzaSyCIqoJQKGVwKgUWJY_iylNRwNrK9u5mvG4",
+    authDomain:        "tylers6.firebaseapp.com",
+    databaseURL:       "https://tylers6-default-rtdb.firebaseio.com",
+    projectId:         "tylers6",
+    storageBucket:     "tylers6.firebasestorage.app",
+    messagingSenderId: "612832029037",
+    appId:             "1:612832029037:web:9aa72ba02cb8ddf9fd5264",
+    measurementId:     "G-B3NECJNZ3L"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+
+  // ── helpers ──────────────────────────────────────────────
+  const dbRef = () => ref(db);
+
+  async function getUsuarios() {
+    const snap = await get(child(dbRef(), 'usuarios'));
+    return snap.exists() ? snap.val() : {};
+  }
+
+  async function salvarUsuario(u) {
+    await set(ref(db, `usuarios/${u.codigo}`), u);
+  }
+
+  async function getCodsServ() {
+    const snap = await get(child(dbRef(), 'codsServ'));
+    return snap.exists() ? snap.val() : {};
+  }
+
+  async function salvarCod(entry) {
+    await set(ref(db, `codsServ/${entry.cod}`), entry);
+  }
+
+  // ── ESTADO LOCAL ─────────────────────────────────────────
+  let usuariosCache = {};
+  let codsServCache = {};
+
+  // Escuta mudanças em tempo real
+  onValue(ref(db, 'usuarios'), snap => {
+    usuariosCache = snap.exists() ? snap.val() : {};
+    // atualiza a UI se estiver numa tela que depende disso
+    if (typeof atualizarUI === 'function') atualizarUI();
+  });
+
+  onValue(ref(db, 'codsServ'), snap => {
+    codsServCache = snap.exists() ? snap.val() : {};
+  });
+
+  // ── FUNÇÕES GLOBAIS ──────────────────────────────────────
+  window._db = {
+    getUsuario: (cod) => usuariosCache[cod] || null,
+    todosUsuarios: () => Object.values(usuariosCache),
+    buscarPorNome: (q) => Object.values(usuariosCache).filter(u =>
+      u.nome.toLowerCase().includes(q.toLowerCase())),
+    codigoExiste: (cod) => !!usuariosCache[cod],
+    salvarUsuario,
+    getCodServ: (cod) => {
+      const c = codsServCache[cod];
+      return (c && !c.usado) ? c : null;
+    },
+    salvarCod,
+    marcarCodUsado: async (cod) => {
+      codsServCache[cod].usado = true;
+      await set(ref(db, `codsServ/${cod}/usado`), true);
+    },
+    configurado: () => firebaseConfig.apiKey !== "COLE_AQUI"
+  };
+
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+
+<style>
+  :root {
+    --bg:#1a0a0d; --bg2:#220d11; --bg3:#2d1018; --card:#1f0c10;
+    --border:#4a1820; --accent:#c0392b; --accent2:#e74c3c;
+    --accent-dim:rgba(192,57,43,0.15); --gold:#d4a843;
+    --gold-dim:rgba(212,168,67,0.15); --text:#f0e8e9;
+    --text-dim:#a08888; --text-muted:#6a4a4d;
+    --green:#2ecc71; --green-dim:rgba(46,204,113,0.12);
+    --blue:#3498db; --blue-dim:rgba(52,152,219,0.12);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:0.4;}
+
+  .orb{position:fixed;border-radius:50%;filter:blur(120px);pointer-events:none;z-index:0;animation:drift 12s ease-in-out infinite;}
+  .orb1{width:500px;height:500px;background:rgba(192,57,43,0.12);top:-200px;right:-100px;}
+  .orb2{width:400px;height:400px;background:rgba(212,168,67,0.07);bottom:-150px;left:-100px;animation-delay:-6s;}
+  @keyframes drift{0%,100%{transform:translate(0,0);}50%{transform:translate(30px,40px);}}
+
+  /* SETUP BANNER */
+
+  /* STATUS BADGE */
+  #status-badge{
+    position:fixed;bottom:16px;right:16px;z-index:50;
+    padding:6px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;
+    letter-spacing:1px;display:flex;align-items:center;gap:6px;
+  }
+  .status-ok{background:var(--green-dim);border:1px solid rgba(46,204,113,0.4);color:var(--green);}
+  .status-err{background:var(--accent-dim);border:1px solid rgba(192,57,43,0.4);color:var(--accent2);}
+
+  header{position:relative;z-index:10;text-align:center;padding:80px 20px 40px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,rgba(30,8,12,0.95) 0%,transparent 100%);}
+  .logo-tag{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:4px;color:var(--accent);text-transform:uppercase;margin-bottom:12px;opacity:0;animation:fadeUp 0.6s ease forwards 0.2s;}
+  .logo{font-family:'Bebas Neue',sans-serif;font-size:clamp(64px,12vw,140px);letter-spacing:6px;line-height:1;background:linear-gradient(135deg,#f5e6e8 0%,#c0392b 40%,#d4a843 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(192,57,43,0.4));opacity:0;animation:fadeUp 0.8s ease forwards 0.1s;}
+  .tagline{max-width:520px;margin:20px auto 0;font-size:14px;font-weight:300;color:var(--text-dim);line-height:1.7;opacity:0;animation:fadeUp 0.8s ease forwards 0.4s;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
+
+  main{position:relative;z-index:5;max-width:1100px;margin:0 auto;padding:50px 20px 100px;}
+  .section-title{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;color:var(--text-muted);text-transform:uppercase;margin-bottom:24px;}
+
+  .nav-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:50px;}
+  .nav-grid .nav-btn:nth-child(5){grid-column:1/-1;}
+  @media(max-width:600px){.nav-grid{grid-template-columns:1fr;}.nav-grid .nav-btn:nth-child(5){grid-column:auto;}}
+
+  .nav-btn{position:relative;background:var(--card);border:1px solid var(--border);padding:28px 24px;cursor:pointer;transition:all 0.3s ease;text-align:left;overflow:hidden;outline:none;}
+  .nav-btn::before{content:'';position:absolute;inset:0;background:var(--accent-dim);opacity:0;transition:opacity 0.3s;}
+  .nav-btn:hover::before{opacity:1;}
+  .nav-btn:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 12px 40px rgba(192,57,43,0.2);}
+  .nav-btn.gold::before{background:var(--gold-dim);}.nav-btn.gold:hover{border-color:var(--gold);box-shadow:0 12px 40px rgba(212,168,67,0.2);}
+  .nav-btn.green-btn::before{background:var(--green-dim);}.nav-btn.green-btn:hover{border-color:var(--green);box-shadow:0 12px 40px rgba(46,204,113,0.15);}
+  .nav-btn.blue-btn::before{background:var(--blue-dim);}.nav-btn.blue-btn:hover{border-color:var(--blue);box-shadow:0 12px 40px rgba(52,152,219,0.2);}
+  .nav-btn-icon{font-size:28px;margin-bottom:14px;display:block;position:relative;z-index:1;}
+  .nav-btn-label{font-size:17px;font-weight:600;color:var(--text);display:block;position:relative;z-index:1;margin-bottom:4px;}
+  .nav-btn-desc{font-size:12px;color:var(--text-muted);position:relative;z-index:1;line-height:1.5;}
+  .nav-btn-arrow{position:absolute;right:20px;top:50%;transform:translateY(-50%);font-size:20px;color:var(--text-muted);transition:transform 0.3s,color 0.3s;}
+  .nav-btn:hover .nav-btn-arrow{transform:translateY(-50%) translateX(4px);color:var(--accent);}
+  .nav-btn.gold:hover .nav-btn-arrow{color:var(--gold);}
+  .nav-btn.green-btn:hover .nav-btn-arrow{color:var(--green);}
+  .nav-btn.blue-btn:hover .nav-btn-arrow{color:var(--blue);}
+
+  .panel{display:none;animation:panelIn 0.4s ease;}
+  .panel.active{display:block;}
+  @keyframes panelIn{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:translateY(0);}}
+  .panel-header{display:flex;align-items:center;gap:14px;margin-bottom:30px;}
+  .back-btn{background:var(--bg3);border:1px solid var(--border);padding:8px 14px;font-size:13px;color:var(--text-dim);cursor:pointer;transition:all 0.2s;font-family:'DM Sans',sans-serif;}
+  .back-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .panel-title{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:3px;color:var(--text);}
+
+  .card{background:var(--card);border:1px solid var(--border);padding:24px;margin-bottom:16px;}
+  .field-label{display:block;font-size:11px;font-family:'JetBrains Mono',monospace;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:10px;}
+  input[type="text"],input[type="number"],textarea{width:100%;background:var(--bg3);border:1px solid var(--border);padding:13px 16px;font-size:15px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;transition:border-color 0.2s,box-shadow 0.2s;-webkit-appearance:none;}
+  input:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(192,57,43,0.15);}
+  input.code-input{font-family:'JetBrains Mono',monospace;font-size:32px;letter-spacing:14px;text-align:center;padding:20px;}
+  textarea{resize:vertical;min-height:90px;}
+
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:13px 28px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;}
+  .btn-primary{background:var(--accent);color:#fff;}.btn-primary:hover{background:var(--accent2);transform:translateY(-1px);box-shadow:0 6px 24px rgba(192,57,43,0.4);}
+  .btn-gold{background:var(--gold);color:#1a0a0d;}.btn-gold:hover{background:#e0b84d;transform:translateY(-1px);box-shadow:0 6px 24px rgba(212,168,67,0.4);}
+  .btn-blue{background:var(--blue);color:#fff;}.btn-blue:hover{background:#2980b9;transform:translateY(-1px);box-shadow:0 6px 24px rgba(52,152,219,0.4);}
+  .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text-dim);}.btn-ghost:hover{border-color:var(--accent);color:var(--accent);}
+  .btn-full{width:100%;justify-content:center;}
+  .btn:disabled{opacity:0.5;cursor:not-allowed;transform:none!important;}
+
+  /* LOADING SPINNER */
+  .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .profile-card{background:linear-gradient(135deg,var(--card) 0%,var(--bg3) 100%);border:1px solid var(--border);padding:30px;margin-bottom:20px;}
+  .profile-avatar{width:64px;height:64px;background:linear-gradient(135deg,var(--accent),var(--gold));display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:white;margin-bottom:16px;font-family:'Bebas Neue',sans-serif;}
+  .profile-name{font-size:22px;font-weight:600;margin-bottom:4px;}
+  .profile-code{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted);letter-spacing:2px;}
+
+  .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0;}
+  .stat-box{background:var(--bg3);border:1px solid var(--border);padding:16px;text-align:center;}
+  .stat-value{font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:2px;color:var(--accent);line-height:1;}
+  .stat-value.gold{color:var(--gold);}.stat-value.green{color:var(--green);}
+  .stat-label{font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-top:6px;font-family:'JetBrains Mono',monospace;}
+
+  .stars-row{display:flex;gap:4px;margin:8px 0;}
+  .star{font-size:18px;}
+  .stars-interactive{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap;}
+  .star-btn{font-size:26px;cursor:pointer;color:#3a2020;transition:color 0.15s,transform 0.15s;background:none;border:none;line-height:1;padding:2px;}
+  .star-btn.lit{color:var(--gold);}.star-btn:hover{transform:scale(1.2);}
+
+  .history-item{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--border);}
+  .history-item:last-child{border-bottom:none;}
+  .history-service{font-size:14px;font-weight:500;}
+  .history-date{font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;}
+
+  .badge{padding:4px 10px;font-size:10px;font-family:'JetBrains Mono',monospace;letter-spacing:1px;}
+  .badge-green{background:var(--green-dim);color:var(--green);border:1px solid rgba(46,204,113,0.3);}
+  .badge-blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(52,152,219,0.3);}
+
+  .service-tags{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;}
+  .service-tag{padding:5px 12px;background:var(--bg3);border:1px solid var(--border);font-size:12px;color:var(--text-dim);}
+
+  .place-card{background:var(--card);border:1px solid var(--border);padding:20px;margin-bottom:12px;display:flex;align-items:flex-start;gap:16px;transition:all 0.25s;}
+  .place-card:hover{border-color:var(--gold);transform:translateX(4px);}
+  .place-icon{font-size:26px;flex-shrink:0;}
+  .place-name{font-size:15px;font-weight:600;margin-bottom:4px;}
+  .place-detail{font-size:12px;color:var(--text-muted);}
+  .place-price{margin-left:auto;text-align:right;flex-shrink:0;}
+  .price-total{font-size:11px;color:var(--text-muted);text-decoration:line-through;}
+  .price-cash{font-size:13px;color:var(--green);font-weight:600;}
+  .price-coupon{font-size:13px;color:var(--gold);font-weight:600;}
+
+  .alert{padding:14px 18px;font-size:13px;margin-bottom:16px;display:flex;align-items:center;gap:10px;line-height:1.5;}
+  .alert-success{background:var(--green-dim);border:1px solid rgba(46,204,113,0.3);color:var(--green);}
+  .alert-error{background:var(--accent-dim);border:1px solid rgba(192,57,43,0.4);color:var(--accent2);}
+  .alert-info{background:var(--gold-dim);border:1px solid rgba(212,168,67,0.3);color:var(--gold);}
+  .alert-blue{background:var(--blue-dim);border:1px solid rgba(52,152,219,0.3);color:var(--blue);}
+
+  .divider{border:none;border-top:1px solid var(--border);margin:24px 0;}
+  .tab-row{display:flex;border-bottom:2px solid var(--border);margin-bottom:24px;}
+  .tab-btn{flex:1;padding:13px 12px;background:transparent;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all 0.2s;margin-bottom:-2px;}
+  .tab-btn:hover{color:var(--text);}.tab-btn.active{color:var(--gold);border-bottom-color:var(--gold);}
+
+  .filter-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;}
+  .filter-btn{padding:6px 16px;background:var(--bg3);border:1px solid var(--border);font-size:12px;color:var(--text-dim);cursor:pointer;transition:all 0.2s;font-family:'DM Sans',sans-serif;}
+  .filter-btn.active,.filter-btn:hover{background:var(--accent);border-color:var(--accent);color:white;}
+
+  .queue-box{background:var(--gold-dim);border:1px solid rgba(212,168,67,0.3);padding:16px 20px;margin-bottom:16px;}
+  .queue-title{font-size:12px;color:var(--gold);font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;}
+  .queue-info{font-size:13px;color:var(--text-dim);}
+  .pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;margin-right:6px;animation:pulse 2s ease infinite;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(46,204,113,0.4);}50%{box-shadow:0 0 0 6px rgba(46,204,113,0);}}
+
+  .rules-box{background:var(--bg3);border-left:3px solid var(--accent);padding:16px 20px;margin-top:20px;}
+  .rules-title{font-size:11px;font-family:'JetBrains Mono',monospace;letter-spacing:2px;color:var(--accent);margin-bottom:10px;}
+  .rules-list{list-style:none;}
+  .rules-list li{font-size:13px;color:var(--text-dim);padding:4px 0;}
+  .rules-list li::before{content:'→ ';color:var(--accent);}
+
+  .form-grid{display:grid;gap:18px;}
+  .hidden{display:none;}
+
+  .cod-big-box{padding:30px;text-align:center;margin-top:16px;}
+  .cod-big-box.gold-box{background:var(--bg3);border:2px solid var(--gold);}
+  .cod-big-box.blue-box{background:var(--bg3);border:2px solid var(--blue);}
+  .cod-big-label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:3px;margin-bottom:12px;}
+  .cod-big-label.gold{color:var(--gold);}.cod-big-label.blue{color:var(--blue);}
+  .cod-big-num{font-family:'Bebas Neue',sans-serif;font-size:90px;letter-spacing:18px;color:var(--text);line-height:1;}
+  .cod-big-sub{font-size:12px;color:var(--text-muted);margin-top:14px;line-height:1.7;}
+
+  .sugestao-item{padding:10px 14px;background:var(--bg3);border:1px solid var(--border);margin-bottom:6px;cursor:pointer;transition:border-color 0.2s;}
+  .sugestao-item:hover{border-color:var(--blue);}
+
+  /* SETUP GUIDE */
+  .setup-step{display:flex;gap:16px;padding:16px 0;border-bottom:1px solid var(--border);}
+  .setup-step:last-child{border-bottom:none;}
+  .setup-num{width:32px;height:32px;background:var(--accent);color:#fff;font-family:'Bebas Neue',sans-serif;font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .setup-text{font-size:13px;color:var(--text-dim);line-height:1.6;}
+  .setup-text strong{color:var(--text);}
+  .setup-text code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg3);padding:2px 6px;color:var(--gold);}
+
+  footer{position:relative;z-index:5;text-align:center;padding:30px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;letter-spacing:2px;}
+</style>
+</head>
+<body>
+
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+
+<!-- BANNER: Firebase não configurado -->
+</div>
+
+<!-- STATUS -->
+<div id="status-badge" class="status-err">● offline</div>
+
+<header>
+  <div class="logo-tag">Sistema Econômico Local</div>
+  <div class="logo">TYLERS 6.0</div>
+  <p class="tagline">Plataforma de troca de serviços que combina dinheiro e cupons para facilitar o acesso, gerar renda e fortalecer a economia local.</p>
+</header>
+
+<main>
+
+  <!-- ══ HOME ══ -->
+  <div id="panel-home" class="panel active">
+    <p class="section-title">/ Acesso rápido</p>
+    <div class="nav-grid">
+      <button class="nav-btn" onclick="show('panel-codigo')">
+        <span class="nav-btn-icon">🔑</span>
+        <span class="nav-btn-label">Seu Código</span>
+        <span class="nav-btn-desc">Acesse seu perfil com o código de 4 dígitos</span>
+        <span class="nav-btn-arrow">→</span>
+      </button>
+      <button class="nav-btn gold" onclick="show('panel-adicionar')">
+        <span class="nav-btn-icon">+</span>
+        <span class="nav-btn-label">Adicionar</span>
+        <span class="nav-btn-desc">Cadastre uma pessoa ou crie seu próprio código</span>
+        <span class="nav-btn-arrow">→</span>
+      </button>
+      <button class="nav-btn" onclick="show('panel-onde')">
+        <span class="nav-btn-icon">🗺</span>
+        <span class="nav-btn-label">Onde Usar Cupons</span>
+        <span class="nav-btn-desc">Serviços e locais que aceitam cupons</span>
+        <span class="nav-btn-arrow">→</span>
+      </button>
+      <button class="nav-btn green-btn" onclick="show('panel-registrar')">
+        <span class="nav-btn-icon">§</span>
+        <span class="nav-btn-label">Cadastrar Serviço</span>
+        <span class="nav-btn-desc">Use o código do serviço para registrar e ganhar cupons</span>
+        <span class="nav-btn-arrow">→</span>
+      </button>
+      <button class="nav-btn blue-btn" onclick="show('panel-cod-servico')">
+        <span class="nav-btn-icon">📋</span>
+        <span class="nav-btn-label">Código do Serviço Prestado</span>
+        <span class="nav-btn-desc">Você recebeu um serviço? Gere o código e avalie aqui</span>
+        <span class="nav-btn-arrow">→</span>
+      </button>
+    </div>
+    <div class="rules-box">
+      <div class="rules-title">// Regras do sistema</div>
+      <ul class="rules-list">
+        <li>Cupons são descontos exclusivos — não substituem dinheiro</li>
+        <li>Sempre há parte do pagamento em dinheiro real</li>
+        <li>Respeite a fila: não é permitido pular a vez</li>
+        <li>Em alta demanda, entre na lista de espera</li>
+        <li>Cupons acumulam a cada serviço registrado</li>
+      </ul>
+    </div>
+    <div style="margin-top:20px">
+      <button class="btn btn-ghost" onclick="show('panel-setup')" style="font-size:12px;padding:8px 16px;">⚙ Configurar banco de dados online</button>
+    </div>
+  </div>
+
+  <!-- ══ SETUP / INSTRUÇÕES ══ -->
+  <div id="panel-setup" class="panel">
+    <div class="panel-header">
+      <button class="back-btn" onclick="show('panel-home')">← Voltar</button>
+      <span class="panel-title">Configurar Firebase</span>
+    </div>
+    <div class="alert alert-info"><span>ℹ</span><span>Siga os passos abaixo para conectar o TYLERS 6.0 a um banco de dados na nuvem. É gratuito e leva cerca de 5 minutos.</span></div>
+    <div class="card">
+      <div class="setup-step">
+        <div class="setup-num">1</div>
+        <div class="setup-text">Acesse <strong>console.firebase.google.com</strong> e entre com sua conta Google. Clique em <strong>"Adicionar projeto"</strong> e dê um nome (ex: tylers6).</div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-num">2</div>
+        <div class="setup-text">Dentro do projeto, clique em <strong>"Realtime Database"</strong> no menu lateral → <strong>"Criar banco de dados"</strong> → escolha qualquer região → <strong>modo de teste</strong> (por 30 dias).</div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-num">3</div>
+        <div class="setup-text">No menu lateral, clique em <strong>"Visão geral do projeto"</strong> (ícone de engrenagem) → <strong>"Configurações do projeto"</strong> → role até <strong>"Seus aplicativos"</strong> → clique no ícone <strong>&lt;/&gt;</strong> (Web) → registre o app → copie o objeto <code>firebaseConfig</code>.</div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-num">4</div>
+        <div class="setup-text">Abra o arquivo <strong>tylers6.html</strong> num editor de texto (ex: Bloco de Notas). Encontre o trecho <code>const firebaseConfig = {</code> e substitua todos os valores <code>"COLE_AQUI"</code> pelos seus dados copiados do Firebase.</div>
+      </div>
+      <div class="setup-step">
+        <div class="setup-num">5</div>
+        <div class="setup-text">Salve o arquivo e abra-o no navegador. O indicador no canto inferior direito vai mostrar <strong style="color:var(--green)">● online</strong> quando estiver conectado. Agora qualquer pessoa que abrir o mesmo arquivo estará conectada ao mesmo banco de dados!</div>
+      </div>
+    </div>
+    <div class="alert alert-info"><span>💡</span><span>Para que todos acessem pelo celular, hospede o arquivo em algum serviço gratuito como <strong>Netlify</strong>, <strong>GitHub Pages</strong> ou <strong>Vercel</strong> — e compartilhe o link.</span></div>
+  </div>
+
+  <!-- ══ SEU CÓDIGO ══ -->
+  <div id="panel-codigo" class="panel">
+    <div class="panel-header">
+      <button class="back-btn" onclick="show('panel-home')">← Voltar</button>
+      <span class="panel-title">Seu Código</span>
+    </div>
+    <div class="card">
+      <label class="field-label">Digite seu código de 4 dígitos</label>
+      <input type="text" class="code-input" id="input-codigo" maxlength="4" placeholder="0000" oninput="this.value=this.value.replace(/\D/g,'')">
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-buscar" onclick="buscarPerfil()">🔍 Acessar Perfil</button>
+        <button class="btn btn-ghost" onclick="limparPerfil()">✕ Limpar</button>
+      </div>
+    </div>
+    <div id="profile-result" class="hidden"></div>
+  </div>
+
+  <!-- ══ + ADICIONAR ══ -->
+  <div id="panel-adicionar" class="panel">
+    <div class="panel-header">
+      <button class="back-btn" onclick="show('panel-home')">← Voltar</button>
+      <span class="panel-title">Criar Meu Código</span>
+    </div>
+
+    <!-- outra pessoa -->
+    <div id="tab-meu" class="">
+      <div id="meu-alert" class="hidden"></div>
+      <div class="card">
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:20px;line-height:1.6;">Cadastre-se escolhendo seu próprio <strong style="color:var(--gold)">código de 4 dígitos</strong>.</p>
+        <div class="form-grid">
+          <div><label class="field-label">Seu Nome Completo</label><input type="text" id="meu-nome" placeholder="Ex: João da Silva"></div>
+          <div><label class="field-label">Serviços que Você Presta</label><textarea id="meu-servicos" placeholder="Ex: Eletricista, Instalações elétricas residenciais"></textarea></div>
+          <div>
+            <label class="field-label">Escolha seu Código (4 dígitos)</label>
+            <input type="text" id="meu-codigo" maxlength="4" placeholder="Ex: 7890" oninput="this.value=this.value.replace(/\D/g,'')">
+            <p style="font-size:11px;color:var(--text-muted);margin-top:6px;font-family:'JetBrains Mono'">Escolha um número fácil de lembrar. Não pode ser repetido.</p>
+          </div>
+        </div>
+        <hr class="divider">
+        <button class="btn btn-primary btn-full" id="btn-meu" onclick="criarMeuCodigo()">🔑 Criar Meu Código</button>
+      </div>
+      <div id="meu-resultado" class="hidden">
+        <div class="alert alert-success" style="margin-top:16px">✓ Cadastro realizado com sucesso! Seu código foi salvo. Anote-o e guarde com segurança.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ ONDE USAR CUPONS ══ -->
+  <div id="panel-onde" class="panel">
+    <div class="panel-header">
+      <button class="back-btn" onclick="show('panel-home')">← Voltar</button>
+      <span class="panel-title">Onde Usar</span>
+    </div>
+    <div class="alert alert-info"><span>🎟</span><span>Cupons cobrem até 50% do valor. A outra metade é sempre paga em dinheiro.</span></div>
+    <div class="filter-row">
+      <button class="filter-btn active" onclick="filtrar('todos',this)">Todos</button>
+      <button class="filter-btn" onclick="filtrar('pessoal',this)">Beleza & Pessoal</button>
+      <button class="filter-btn" onclick="filtrar('casa',this)">Casa & Manutenção</button>
+      <button class="filter-btn" onclick="filtrar('educacao',this)">Educação & Saúde</button>
+      <button class="filter-btn" onclick="filtrar('comercio',this)">Comércio Local</button>
+    </div>
+    <div id="lugares-lista"></div>
+  </div>
+
+  <!-- ══ § CADASTRAR SERVIÇO (prestador) ══ -->
+  <div id="panel-registrar" class="panel">
+    <div class="panel-header">
+      <button class="back-btn" onclick="show('panel-home')">← Voltar</button>
+      <span class="panel-title">§ Cadastrar Serviço</span>
+    </div>
+    <div class="alert alert-info"><span>ℹ</span><span>Peça o <strong>Código do Serviço</strong> gerado por quem recebeu o serviço e insira abaixo.</span></div>
+    <div id="reg-alert" class="hidden"></div>
+    <div class="card" id="reg-step1">
+      <label class="field-label">Código do Serviço (gerado pelo cliente)</label>
+      <input type="text" class="code-input" id="reg-cod" maxlength="4" placeholder="0000" oninput="this.value=this.value.replace(/\D/g,'')">
+      <div style="margin-top:16px;">
+        <button class="btn btn-primary" id="btn-validar" onclick="validarCodServico()">→ Validar Código</button>
+      </div>
+    </div>
+    <div id="reg-step2" class="hidden">
+      <div class="card">
+        <div id="reg-info"></div>
+        <hr class="divider">
+        <div class="form-grid">
+          <div><label class="field-label">Serviço Realizado</label><input type="text" id="reg-servico-nome" placeholder="Ex: Corte de cabelo"></div>
+          <div><label class="field-label">Valor Total Cobrado (R$)</label><input type="number" id="reg-valor" placeholder="Ex: 40"></div>
+        </div>
+        <hr class="divider">
+        <button class="btn btn-gold btn-full" id="btn-confirmar" onclick="confirmarServico()">§ Confirmar e Receber Cupons</button>
+      </div>
+      <div class="queue-box">
+        <div class="queue-title">// FILA DE ATENDIMENTO</div>
+        <div class="queue-info"><span class="pulse-dot"></span>Respeitando a ordem de chegada. Em alta demanda, lista de espera criada automaticamente.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ CÓDIGO DO SERVIÇO PRESTADO (cliente que recebeu) ══ -->
+  <div id="panel-cod-servico" class="panel">
+    <div class="panel-header">
+      <button class="back-btn" onclick="show('panel-home')">← Voltar</button>
+      <span class="panel-title">Código do Serviço</span>
+    </div>
+    <div class="alert alert-blue"><span>📋</span><span>Você recebeu um serviço? Busque o nome de quem prestou, avalie e gere o código para ele registrar.</span></div>
+    <div id="cs-alert" class="hidden"></div>
+
+    <div id="cs-step1">
+      <div class="card">
+        <label class="field-label">Nome do Prestador de Serviço</label>
+        <input type="text" id="cs-busca" placeholder="Digite o nome de quem prestou o serviço..." oninput="filtrarPrestadores(this.value)">
+        <div id="cs-sugestoes" style="margin-top:8px;"></div>
+      </div>
+      <div id="cs-step1b" class="hidden">
+        <div class="card">
+          <div id="cs-prestador-info"></div>
+          <hr class="divider">
+          <label class="field-label">Avalie o serviço — clique nas estrelas (1 a 10)</label>
+          <div class="stars-interactive" id="cs-stars"></div>
+          <input type="hidden" id="cs-avaliacao" value="">
+          <p id="cs-av-label" style="font-size:12px;color:var(--text-muted);margin-top:6px;font-family:'JetBrains Mono'">Nenhuma estrela selecionada</p>
+          <hr class="divider">
+          <button class="btn btn-blue btn-full" id="btn-gerar-cod" onclick="gerarCodServico()">📋 Gerar Código do Serviço</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="cs-resultado" class="hidden">
+      <div class="cod-big-box blue-box">
+        <div class="cod-big-label blue">CÓDIGO DO SERVIÇO</div>
+        <div class="cod-big-num" id="cs-cod-num"></div>
+        <div class="cod-big-sub">
+          Mostre este código para <strong id="cs-nome-final" style="color:var(--text)"></strong>.<br>
+          Ele deve usar no painel <strong style="color:var(--green)">§ Cadastrar Serviço</strong> para receber os cupons.<br>
+          <span style="color:var(--accent)">Código expira após o uso.</span>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:20px;">
+          <button class="btn btn-ghost" onclick="copiarEl('cs-cod-num',this)">📋 Copiar Código</button>
+          <button class="btn btn-ghost" onclick="resetCodServico()">↺ Novo Código</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>TYLERS 6.0 — Sistema de Economia Local © 2025</footer>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// FIREBASE WRAPPER — aguarda módulo carregar
+// ═══════════════════════════════════════════════════════
+let firebaseReady = false;
+
+window.addEventListener('firebase-ready', () => {
+  firebaseReady = true;
+  const ok = window._db && window._db.configurado();
+  const badge = document.getElementById('status-badge');
+  if (ok) {
+    badge.textContent = '● online';
+    badge.className = 'status-ok';
+    document.getElementById('status-badge').style.cssText='position:fixed;bottom:16px;right:16px;z-index:50;padding:6px 14px;font-size:11px;font-family:JetBrains Mono,monospace;letter-spacing:1px;display:flex;align-items:center;gap:6px;background:var(--green-dim);border:1px solid rgba(46,204,113,0.4);color:var(--green);';
+  } else {
+    badge.textContent = '● local (sem nuvem)';
+    // fallback localStorage
+    initLocalFallback();
+  }
+});
+
+// Se firebase demorar mais que 4s, usa localStorage
+setTimeout(() => {
+  if (!firebaseReady) { initLocalFallback(); }
+}, 4000);
+
+// ═══════════════════════════════════════════════════════
+// FALLBACK LOCAL (quando Firebase não está configurado)
+// ═══════════════════════════════════════════════════════
+function initLocalFallback() {
+  if (window._db) return; // Firebase já iniciou
+
+  const seed = [
+    { codigo:'1234', nome:'Ana Paula Ferreira',  servicos:['Manicure','Pedicure'],         cupons:8,  historico:[{servico:'Manicure',data:'12/04/2025',valor:100,status:'concluído',avaliacao:9}], avaliacoes:[9,8,10] },
+    { codigo:'5678', nome:'Carlos Eduardo Lima', servicos:['Barbeiro','Corte Masculino'],  cupons:3,  historico:[{servico:'Corte + Barba',data:'25/04/2025',valor:60,status:'concluído',avaliacao:10}], avaliacoes:[10] },
+    { codigo:'9012', nome:'Fernanda Souza',       servicos:['Personal Trainer','Pilates'], cupons:12, historico:[{servico:'Treino Funcional',data:'28/04/2025',valor:120,status:'concluído',avaliacao:9}], avaliacoes:[9,10] },
+  ];
+
+  let us = JSON.parse(localStorage.getItem('tylers_u2') || 'null');
+  if (!us) { us={}; seed.forEach(u=>us[u.codigo]=u); localStorage.setItem('tylers_u2',JSON.stringify(us)); }
+  let cs = JSON.parse(localStorage.getItem('tylers_cs2') || '{}');
+
+  const save  = () => localStorage.setItem('tylers_u2', JSON.stringify(us));
+  const saveC = () => localStorage.setItem('tylers_cs2', JSON.stringify(cs));
+
+  window._db = {
+    configurado: () => false,
+    getUsuario:  (cod) => us[cod] || null,
+    todosUsuarios: () => Object.values(us),
+    buscarPorNome: (q) => Object.values(us).filter(u=>u.nome.toLowerCase().includes(q.toLowerCase())),
+    codigoExiste:  (cod) => !!us[cod],
+    salvarUsuario: async (u) => { us[u.codigo]=u; save(); },
+    getCodServ: (cod) => { const c=cs[cod]; return (c&&!c.usado)?c:null; },
+    salvarCod:  async (e) => { cs[e.cod]=e; saveC(); },
+    marcarCodUsado: async (cod) => { cs[cod].usado=true; saveC(); }
+  };
+
+  firebaseReady = true;
+}
+
+// ═══════════════════════════════════════════════════════
+// DADOS ESTÁTICOS — lugares
+// ═══════════════════════════════════════════════════════
+const lugares = [
+  {icon:'✂️',nome:'Barbeiro',detalhe:'Corte masculino, barba',cat:'pessoal',total:40,cash:20,cupom:20},
+  {icon:'💅',nome:'Manicure',detalhe:'Unhas, pedicure, esmaltação',cat:'pessoal',total:100,cash:50,cupom:50},
+  {icon:'💇',nome:'Cabeleireiro',detalhe:'Corte, escova, tintura',cat:'pessoal',total:120,cash:60,cupom:60},
+  {icon:'🧴',nome:'Produtos de Higiene',detalhe:'Farmácias e lojas parceiras',cat:'comercio',total:50,cash:25,cupom:25},
+  {icon:'🏠',nome:'Limpeza de Casa',detalhe:'Faxina geral, organização',cat:'casa',total:150,cash:75,cupom:75},
+  {icon:'🧹',nome:'Diarista',detalhe:'Serviços diários de limpeza',cat:'casa',total:100,cash:50,cupom:50},
+  {icon:'💪',nome:'Personal Trainer',detalhe:'Treinos personalizados',cat:'educacao',total:120,cash:60,cupom:60},
+  {icon:'📚',nome:'Aulas Particulares',detalhe:'Reforço escolar, idiomas',cat:'educacao',total:80,cash:40,cupom:40},
+  {icon:'🔧',nome:'Mecânico',detalhe:'Reparos automotivos',cat:'casa',total:200,cash:100,cupom:100},
+  {icon:'⚡',nome:'Eletricista',detalhe:'Instalações e reparos elétricos',cat:'casa',total:160,cash:80,cupom:80},
+  {icon:'🚿',nome:'Encanador',detalhe:'Vazamentos, instalações',cat:'casa',total:180,cash:90,cupom:90},
+  {icon:'🛒',nome:'Mercadinho de Bairro',detalhe:'Produtos do dia a dia',cat:'comercio',total:60,cash:30,cupom:30},
+  {icon:'🥪',nome:'Lanchonete Local',detalhe:'Refeições e lanches',cat:'comercio',total:30,cash:15,cupom:15},
+];
+
+// ═══════════════════════════════════════════════════════
+// UTILITÁRIOS
+// ═══════════════════════════════════════════════════════
+function show(id) {
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function setLoading(btnId, loading, label='') {
+  const b = document.getElementById(btnId);
+  if (!b) return;
+  b.disabled = loading;
+  if (loading) b.innerHTML = `<span class="spinner"></span> Salvando...`;
+  else if (label) b.innerHTML = label;
+}
+
+function copiarEl(elId, btn) {
+  const txt = document.getElementById(elId).textContent;
+  navigator.clipboard.writeText(txt).catch(()=>{});
+  const orig = btn.textContent; btn.textContent='✓ Copiado!';
+  setTimeout(()=>btn.textContent=orig, 2000);
+}
+
+function waitDB(fn) {
+  if (firebaseReady && window._db) { fn(); return; }
+  const int = setInterval(()=>{ if(firebaseReady&&window._db){ clearInterval(int); fn(); }}, 200);
+}
+
+// ═══════════════════════════════════════════════════════
+// SEU CÓDIGO
+// ═══════════════════════════════════════════════════════
+function limparPerfil() {
+  document.getElementById('input-codigo').value='';
+  document.getElementById('profile-result').classList.add('hidden');
+}
+
+function buscarPerfil() {
+  const cod = document.getElementById('input-codigo').value.trim();
+  const el  = document.getElementById('profile-result');
+  if (cod.length!==4) { el.innerHTML='<div class="alert alert-error">✕ Digite exatamente 4 dígitos.</div>'; el.classList.remove('hidden'); return; }
+
+  setLoading('btn-buscar', true);
+  waitDB(async () => {
+    const u = window._db.getUsuario(cod);
+    setLoading('btn-buscar', false, '🔍 Acessar Perfil');
+    if (!u) { el.innerHTML='<div class="alert alert-error">✕ Código não encontrado no banco de dados.</div>'; el.classList.remove('hidden'); return; }
+
+    const avg = u.avaliacoes&&u.avaliacoes.length ? (u.avaliacoes.reduce((a,b)=>a+b,0)/u.avaliacoes.length).toFixed(1) : '—';
+    const tags = (u.servicos||[]).map(s=>`<span class="service-tag">${s}</span>`).join('');
+    const hist = (u.historico||[]).map(h=>`
+      <div class="history-item">
+        <div><div class="history-service">${h.servico}</div><div class="history-date">${h.data} · R$${h.valor}</div></div>
+        <span class="badge badge-green">${h.status}</span>
+      </div>`).join('') || '<p style="color:var(--text-muted);font-size:13px">Nenhum serviço registrado ainda.</p>';
+    let stars=''; for(let i=1;i<=10;i++) stars+=`<span class="star" style="color:${i<=parseFloat(avg)?'#d4a843':'#3a2020'}">${i<=parseFloat(avg)?'★':'☆'}</span>`;
+
+    el.innerHTML=`
+      <div class="profile-card">
+        <div class="profile-avatar">${u.nome.split(' ').map(w=>w[0]).slice(0,2).join('')}</div>
+        <div class="profile-name">${u.nome}</div>
+        <div class="profile-code">CÓD: ${u.codigo}</div>
+        <div class="service-tags" style="margin-top:12px">${tags}</div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-box"><div class="stat-value gold">${u.cupons||0}</div><div class="stat-label">Cupons</div></div>
+        <div class="stat-box"><div class="stat-value">${(u.historico||[]).length}</div><div class="stat-label">Serviços</div></div>
+        <div class="stat-box"><div class="stat-value green">${avg}</div><div class="stat-label">Avaliação</div></div>
+      </div>
+      <div class="card"><p class="section-title">/ Avaliação média</p><div class="stars-row">${stars}</div><p style="font-size:12px;color:var(--text-muted)">Baseada em ${(u.avaliacoes||[]).length} avaliação(ões)</p></div>
+      <div class="card"><p class="section-title">/ Histórico de serviços</p>${hist}</div>`;
+    el.classList.remove('hidden');
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// ADICIONAR
+// ═══════════════════════════════════════════════════════
+function switchTab(t) {
+  document.getElementById('tab-outro').classList.toggle('hidden', t!=='outro');
+  document.getElementById('tab-meu').classList.toggle('hidden', t!=='meu');
+  document.getElementById('tab-btn-outro').classList.toggle('active', t==='outro');
+  document.getElementById('tab-btn-meu').classList.toggle('active', t==='meu');
+}
+
+function cadastrarPessoa() {
+  const nome=document.getElementById('add-nome').value.trim();
+  const serv=document.getElementById('add-servicos').value.trim();
+  const cod =document.getElementById('add-codigo').value.trim();
+  const alertEl=document.getElementById('add-alert');
+  if (!nome||!serv||cod.length!==4) { alertEl.innerHTML='<div class="alert alert-error">✕ Preencha todos os campos e escolha um código de 4 dígitos.</div>'; alertEl.classList.remove('hidden'); return; }
+
+  setLoading('btn-add', true);
+  waitDB(async () => {
+    if (window._db.codigoExiste(cod)) {
+      setLoading('btn-add', false, '+ Confirmar Cadastro');
+      alertEl.innerHTML='<div class="alert alert-error">✕ Este código já está em uso. Escolha outro.</div>'; alertEl.classList.remove('hidden'); return;
+    }
+    const u = {codigo:cod, nome, servicos:serv.split(',').map(s=>s.trim()).filter(Boolean), cupons:0, historico:[], avaliacoes:[]};
+    await window._db.salvarUsuario(u);
+    setLoading('btn-add', false, '+ Confirmar Cadastro');
+    document.getElementById('add-nome').value=''; document.getElementById('add-servicos').value=''; document.getElementById('add-codigo').value='';
+    alertEl.innerHTML=`<div class="alert alert-success">✓ <strong>${nome}</strong> cadastrado(a) com código <strong style="font-family:'JetBrains Mono'">${cod}</strong>! Dados salvos na nuvem.</div>`;
+    alertEl.classList.remove('hidden');
+  });
+}
+
+function criarMeuCodigo() {
+  const nome=document.getElementById('meu-nome').value.trim();
+  const serv=document.getElementById('meu-servicos').value.trim();
+  const cod =document.getElementById('meu-codigo').value.trim();
+  const alertEl=document.getElementById('meu-alert');
+  if (!nome||!serv||cod.length!==4) { alertEl.innerHTML='<div class="alert alert-error">✕ Preencha todos os campos e escolha um código de 4 dígitos.</div>'; alertEl.classList.remove('hidden'); return; }
+
+  setLoading('btn-meu', true);
+  waitDB(async () => {
+    if (window._db.codigoExiste(cod)) {
+      setLoading('btn-meu', false, '🔑 Criar Meu Código');
+      alertEl.innerHTML='<div class="alert alert-error">✕ Este código já está em uso. Escolha outro.</div>'; alertEl.classList.remove('hidden'); return;
+    }
+    const u = {codigo:cod, nome, servicos:serv.split(',').map(s=>s.trim()).filter(Boolean), cupons:0, historico:[], avaliacoes:[]};
+    await window._db.salvarUsuario(u);
+    setLoading('btn-meu', false, '🔑 Criar Meu Código');
+    alertEl.classList.add('hidden');
+    document.getElementById('meu-resultado').classList.remove('hidden');
+    document.getElementById('meu-nome').value=''; document.getElementById('meu-servicos').value=''; document.getElementById('meu-codigo').value='';
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// ONDE USAR
+// ═══════════════════════════════════════════════════════
+function renderLugares(cat) {
+  const lista = cat==='todos' ? lugares : lugares.filter(l=>l.cat===cat);
+  document.getElementById('lugares-lista').innerHTML=lista.map(l=>`
+    <div class="place-card">
+      <div class="place-icon">${l.icon}</div>
+      <div><div class="place-name">${l.nome}</div><div class="place-detail">${l.detalhe}</div><div style="margin-top:8px"><span class="badge badge-green">aceita cupons</span></div></div>
+      <div class="place-price"><div class="price-total">R$${l.total}</div><div class="price-cash">💵 R$${l.cash}</div><div class="price-coupon">🎟 R$${l.cupom}</div></div>
+    </div>`).join('');
+}
+function filtrar(cat,btn) { document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); renderLugares(cat); }
+
+// ═══════════════════════════════════════════════════════
+// CÓDIGO DO SERVIÇO (cliente gera)
+// ═══════════════════════════════════════════════════════
+let csPrestador = null;
+
+function filtrarPrestadores(q) {
+  const sug=document.getElementById('cs-sugestoes');
+  const step1b=document.getElementById('cs-step1b');
+  if (q.length<2) { sug.innerHTML=''; step1b.classList.add('hidden'); csPrestador=null; return; }
+  waitDB(() => {
+    const matches = window._db.buscarPorNome(q).slice(0,6);
+    if (!matches.length) { sug.innerHTML='<p style="font-size:12px;color:var(--text-muted);padding:8px 0">Nenhum prestador encontrado.</p>'; step1b.classList.add('hidden'); return; }
+    sug.innerHTML=matches.map(u=>`
+      <div class="sugestao-item" onclick="selecionarPrestador('${u.codigo}')">
+        <span style="font-weight:600">${u.nome}</span>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:10px;font-family:'JetBrains Mono'">${(u.servicos||[]).slice(0,2).join(', ')}</span>
+      </div>`).join('');
+  });
+}
+
+function selecionarPrestador(cod) {
+  waitDB(() => {
+    const u = window._db.getUsuario(cod);
+    if (!u) return;
+    csPrestador=u;
+    document.getElementById('cs-busca').value=u.nome;
+    document.getElementById('cs-sugestoes').innerHTML='';
+    const avg=u.avaliacoes&&u.avaliacoes.length?(u.avaliacoes.reduce((a,b)=>a+b,0)/u.avaliacoes.length).toFixed(1):'—';
+    document.getElementById('cs-prestador-info').innerHTML=`
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="profile-avatar" style="width:48px;height:48px;font-size:18px">${u.nome.split(' ').map(w=>w[0]).slice(0,2).join('')}</div>
+        <div>
+          <div style="font-weight:600;font-size:16px">${u.nome}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${(u.servicos||[]).join(', ')}</div>
+          <div style="font-size:11px;color:var(--gold);margin-top:4px;font-family:'JetBrains Mono'">Avaliação atual: ${avg}/10</div>
+        </div>
+      </div>`;
+
+    const row=document.getElementById('cs-stars'); row.innerHTML='';
+    document.getElementById('cs-avaliacao').value='';
+    document.getElementById('cs-av-label').textContent='Nenhuma estrela selecionada';
+    for(let i=1;i<=10;i++){
+      const b=document.createElement('button'); b.className='star-btn'; b.textContent='★'; b.dataset.val=i;
+      b.onclick=()=>{
+        const v=parseInt(b.dataset.val);
+        document.getElementById('cs-avaliacao').value=v;
+        document.getElementById('cs-av-label').textContent=`${v} estrela${v>1?'s':''} selecionada${v>1?'s':''}`;
+        document.querySelectorAll('.star-btn').forEach(s=>s.classList.toggle('lit',parseInt(s.dataset.val)<=v));
+      };
+      row.appendChild(b);
+    }
+    document.getElementById('cs-step1b').classList.remove('hidden');
+    document.getElementById('cs-alert').classList.add('hidden');
+  });
+}
+
+function gerarCodServico() {
+  const av=document.getElementById('cs-avaliacao').value;
+  const alertEl=document.getElementById('cs-alert');
+  if (!csPrestador) { alertEl.innerHTML='<div class="alert alert-error">✕ Selecione o prestador.</div>'; alertEl.classList.remove('hidden'); return; }
+  if (!av) { alertEl.innerHTML='<div class="alert alert-error">✕ Clique nas estrelas para avaliar antes de gerar o código.</div>'; alertEl.classList.remove('hidden'); return; }
+
+  setLoading('btn-gerar-cod', true);
+  waitDB(async () => {
+    const cod = String(Math.floor(1000+Math.random()*9000));
+    const entry = {cod, prestadorCod:csPrestador.codigo, avaliacao:parseInt(av), usado:false};
+    await window._db.salvarCod(entry);
+    setLoading('btn-gerar-cod', false, '📋 Gerar Código do Serviço');
+    document.getElementById('cs-cod-num').textContent=cod;
+    document.getElementById('cs-nome-final').textContent=csPrestador.nome;
+    document.getElementById('cs-resultado').classList.remove('hidden');
+    document.getElementById('cs-step1').classList.add('hidden');
+    alertEl.classList.add('hidden');
+  });
+}
+
+function resetCodServico() {
+  csPrestador=null;
+  document.getElementById('cs-resultado').classList.add('hidden');
+  document.getElementById('cs-step1').classList.remove('hidden');
+  document.getElementById('cs-busca').value='';
+  document.getElementById('cs-sugestoes').innerHTML='';
+  document.getElementById('cs-step1b').classList.add('hidden');
+  document.getElementById('cs-avaliacao').value='';
+}
+
+// ═══════════════════════════════════════════════════════
+// § CADASTRAR SERVIÇO (prestador valida)
+// ═══════════════════════════════════════════════════════
+function validarCodServico() {
+  const cod=document.getElementById('reg-cod').value.trim();
+  const alertEl=document.getElementById('reg-alert');
+  if (cod.length!==4) { alertEl.innerHTML='<div class="alert alert-error">✕ Digite o código de 4 dígitos do serviço.</div>'; alertEl.classList.remove('hidden'); return; }
+
+  setLoading('btn-validar', true);
+  waitDB(async () => {
+    const entry = window._db.getCodServ(cod);
+    setLoading('btn-validar', false, '→ Validar Código');
+    if (!entry) { alertEl.innerHTML='<div class="alert alert-error">✕ Código não encontrado ou já utilizado.</div>'; alertEl.classList.remove('hidden'); return; }
+    const prest = window._db.getUsuario(entry.prestadorCod);
+    if (!prest) { alertEl.innerHTML='<div class="alert alert-error">✕ Prestador não encontrado.</div>'; alertEl.classList.remove('hidden'); return; }
+
+    alertEl.classList.add('hidden');
+    document.getElementById('reg-step1').classList.add('hidden');
+    document.getElementById('reg-step2').classList.remove('hidden');
+    document.getElementById('reg-info').innerHTML=`
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="profile-avatar" style="width:48px;height:48px;font-size:18px">${prest.nome.split(' ').map(w=>w[0]).slice(0,2).join('')}</div>
+        <div>
+          <div style="font-weight:600">${prest.nome}</div>
+          <div style="font-size:12px;color:var(--text-muted)">CÓD: ${prest.codigo}</div>
+          <div style="margin-top:6px"><span class="badge badge-blue">Código válido ✓</span></div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono'">AVALIAÇÃO RECEBIDA</div>
+          <div style="font-size:32px;color:var(--gold);font-family:'Bebas Neue';letter-spacing:2px">${entry.avaliacao}/10 ★</div>
+        </div>
+      </div>`;
+    document.getElementById('reg-servico-nome').value=prest.servicos&&prest.servicos[0]||'';
+  });
+}
+
+function confirmarServico() {
+  const cod=document.getElementById('reg-cod').value.trim();
+  const nome=document.getElementById('reg-servico-nome').value.trim();
+  const valor=parseFloat(document.getElementById('reg-valor').value);
+  const alertEl=document.getElementById('reg-alert');
+  if (!nome||isNaN(valor)||valor<=0) { alertEl.innerHTML='<div class="alert alert-error">✕ Preencha o serviço e o valor corretamente.</div>'; alertEl.classList.remove('hidden'); return; }
+
+  setLoading('btn-confirmar', true);
+  waitDB(async () => {
+    const entry=window._db.getCodServ(cod);
+    if (!entry) { setLoading('btn-confirmar',false,'§ Confirmar e Receber Cupons'); alertEl.innerHTML='<div class="alert alert-error">✕ Código inválido ou já usado.</div>'; alertEl.classList.remove('hidden'); return; }
+    const prest=window._db.getUsuario(entry.prestadorCod);
+    const cupons=Math.max(1,Math.floor(valor/20));
+    const hoje=new Date().toLocaleDateString('pt-BR');
+
+    if(!prest.avaliacoes) prest.avaliacoes=[];
+    if(!prest.historico)  prest.historico=[];
+    prest.avaliacoes.push(entry.avaliacao);
+    prest.cupons=(prest.cupons||0)+cupons;
+    prest.historico.unshift({servico:nome,data:hoje,valor,status:'concluído',avaliacao:entry.avaliacao});
+
+    await window._db.salvarUsuario(prest);
+    await window._db.marcarCodUsado(cod);
+    setLoading('btn-confirmar',false,'§ Confirmar e Receber Cupons');
+
+    alertEl.innerHTML=`<div class="alert alert-success">✓ Serviço registrado na nuvem! <strong>+${cupons} cupons</strong> adicionados a ${prest.nome}. Avaliação ${entry.avaliacao}/10 ★ salva!</div>`;
+    alertEl.classList.remove('hidden');
+
+    setTimeout(()=>{
+      document.getElementById('reg-step2').classList.add('hidden');
+      document.getElementById('reg-step1').classList.remove('hidden');
+      document.getElementById('reg-cod').value='';
+      document.getElementById('reg-servico-nome').value='';
+      document.getElementById('reg-valor').value='';
+    }, 4500);
+  });
+}
+
+// INIT
+renderLugares('todos');
+</script>
+</body>
+</html>
